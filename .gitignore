@@ -1,4 +1,13 @@
+# Environment variables
 .env
+
+# Virtual environment
 venv/
-__pycache__/*
+.venv/
+
+# Python cache
+__pycache__/
+*.py[cod]
+
+# App entry (nếu không muốn commit)
 app.py
