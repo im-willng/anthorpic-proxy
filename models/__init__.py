@@ -8,6 +8,7 @@ class Message(BaseModel):
 # 
 from typing import Union
 from models.google_gemini.gen_message import GeminiProcess
+from models.openai_gpt.gen_message import GPTProcess
 
-LLMInputModel = Union[GeminiProcess]
+LLMInputModel = Union[GeminiProcess, GPTProcess]
 
