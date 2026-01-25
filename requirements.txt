@@ -1,3 +1,7 @@
 openai
 fastapi
 uvicorn
+sqlalchemy
+cryptography
+python-dotenv
+jinja2

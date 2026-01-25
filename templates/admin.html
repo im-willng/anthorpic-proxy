@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin - Proxy Manager</title>
+    <link rel="stylesheet" href="/static/admin.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🔧 Proxy Manager</h1>
+            <p>Manage LLM provider configurations and routing</p>
+        </header>
+
+        <div id="alertContainer"></div>
+
+        <div class="admin-controls">
+            <button class="btn btn-success" onclick="openCreateModal()">+ Create New Proxy</button>
+        </div>
+
+        <div id="proxiesContainer" class="proxies-grid"></div>
+    </div>
+
+    <!-- Create/Edit Modal -->
+    <div id="proxyModal" class="modal-overlay">
+        <div class="modal-content">
+            <button class="modal-close" onclick="closeModal()">×</button>
+            <div class="modal-header">
+                <h2 id="modalTitle">Create Proxy</h2>
+            </div>
+            <form id="proxyForm" onsubmit="submitForm(event)">
+                <input type="hidden" id="proxyId" value="">
+
+                <div class="form-group">
+                    <label for="name">Proxy Name *</label>
+                    <input type="text" id="name" name="name" required placeholder="e.g., GPT-4 Production">
+                </div>
+
+                <div class="form-group">
+                    <label for="provider">Provider *</label>
+                    <select id="provider" name="provider" required>
+                        <option value="">Select a provider</option>
+                        <option value="openai">OpenAI</option>
+                        <option value="google">Google Gemini</option>
+                        <option value="ollama">Ollama</option>
+                        <option value="vertex">Vertex AI</option>
+                        <option value="bedrock">AWS Bedrock</option>
+                        <option value="custom">Custom</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="model">Model Name *</label>
+                    <input type="text" id="model" name="model" required placeholder="e.g., gpt-4, gemini-pro">
+                </div>
+
+                <div class="form-group">
+                    <label for="apiKey">API Key *</label>
+                    <input type="text" id="apiKey" name="api_key" required placeholder="Enter API key (encrypted in storage)">
+                </div>
+
+                <div class="form-group">
+                    <label for="baseUrl">Base URL (Optional)</label>
+                    <input type="url" id="baseUrl" name="base_url" placeholder="https://api.example.com">
+                </div>
+
+                <div class="form-group">
+                    <label for="priority">Priority</label>
+                    <input type="number" id="priority" name="priority" value="0" min="0" max="100">
+                </div>
+
+                <div class="form-group">
+                    <label for="description">Description (Optional)</label>
+                    <textarea id="description" name="description" placeholder="Add notes about this proxy..."></textarea>
+                </div>
+
+                <div class="form-group">
+                    <div class="checkbox-group">
+                        <input type="checkbox" id="enabled" name="enabled" checked>
+                        <label for="enabled" style="margin-bottom: 0;">Enabled</label>
+                    </div>
+                </div>
+
+                <div class="form-actions">
+                    <button type="button" class="btn" onclick="closeModal()">Cancel</button>
+                    <button type="submit" class="btn btn-success">Save Proxy</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        // API base URL
+        const API_BASE = '/admin/proxies/';
+
+        // Load proxies on page load
+        document.addEventListener('DOMContentLoaded', loadProxies);
+
+        async function loadProxies() {
+            try {
+                const response = await fetch(API_BASE);
+                const proxies = await response.json();
+
+                const container = document.getElementById('proxiesContainer');
+
+                if (proxies.length === 0) {
+                    container.innerHTML = `
+                        <div class="empty-state" style="grid-column: 1 / -1;">
+                            <h3>No proxies configured yet</h3>
+                            <p>Create your first proxy configuration to get started</p>
+                            <button class="btn btn-success" onclick="openCreateModal()">Create First Proxy</button>
+                        </div>
+                    `;
+                    return;
+                }
+
+                container.innerHTML = proxies.map(proxy => `
+                    <div class="proxy-card ${proxy.enabled ? '' : 'disabled'}">
+                        <div class="proxy-header">
+                            <div class="proxy-title">
+                                <h3>${escapeHtml(proxy.name)}</h3>
+                                <span class="proxy-provider">${escapeHtml(proxy.provider)}</span>
+                                <span class="proxy-status ${proxy.enabled ? 'enabled' : 'disabled'}">
+                                    ${proxy.enabled ? 'Enabled' : 'Disabled'}
+                                </span>
+                            </div>
+                        </div>
+
+                        <div class="proxy-details">
+                            <div class="proxy-detail">
+                                <span class="proxy-detail-label">Model:</span>
+                                <span class="proxy-detail-value">${escapeHtml(proxy.model)}</span>
+                            </div>
+                            <div class="proxy-detail">
+                                <span class="proxy-detail-label">Priority:</span>
+                                <span class="proxy-detail-value">${proxy.priority}</span>
+                            </div>
+                            ${proxy.base_url ? `
+                                <div class="proxy-detail">
+                                    <span class="proxy-detail-label">URL:</span>
+                                    <span class="proxy-detail-value">${escapeHtml(proxy.base_url)}</span>
+                                </div>
+                            ` : ''}
+                            ${proxy.description ? `
+                                <div class="proxy-detail">
+                                    <span class="proxy-detail-label">Notes:</span>
+                                    <span class="proxy-detail-value">${escapeHtml(proxy.description)}</span>
+                                </div>
+                            ` : ''}
+                            <div class="proxy-detail">
+                                <span class="proxy-detail-label">Created:</span>
+                                <span class="proxy-detail-value">${new Date(proxy.created_at).toLocaleDateString()}</span>
+                            </div>
+                        </div>
+
+                        <div class="proxy-actions">
+                            <button class="btn btn-small" onclick="editProxy(${proxy.id})">Edit</button>
+                            <button class="btn btn-small ${proxy.enabled ? 'btn-danger' : 'btn-success'}"
+                                onclick="toggleProxy(${proxy.id}, ${proxy.enabled})">
+                                ${proxy.enabled ? 'Disable' : 'Enable'}
+                            </button>
+                            <button class="btn btn-small btn-danger" onclick="deleteProxy(${proxy.id})">Delete</button>
+                        </div>
+                    </div>
+                `).join('');
+            } catch (error) {
+                showAlert('Error loading proxies: ' + error.message, 'error');
+            }
+        }
+
+        function openCreateModal() {
+            document.getElementById('proxyId').value = '';
+            document.getElementById('modalTitle').textContent = 'Create Proxy';
+            document.getElementById('proxyForm').reset();
+            document.getElementById('enabled').checked = true;
+            document.getElementById('proxyModal').classList.add('active');
+        }
+
+        async function editProxy(id) {
+            try {
+                const response = await fetch(`${API_BASE}/${id}`);
+                const proxy = await response.json();
+
+                document.getElementById('proxyId').value = id;
+                document.getElementById('name').value = proxy.name;
+                document.getElementById('provider').value = proxy.provider;
+                document.getElementById('model').value = proxy.model;
+                document.getElementById('apiKey').value = ''; // Don't show existing key
+                document.getElementById('baseUrl').value = proxy.base_url || '';
+                document.getElementById('priority').value = proxy.priority;
+                document.getElementById('description').value = proxy.description || '';
+                document.getElementById('enabled').checked = proxy.enabled;
+                document.getElementById('apiKey').placeholder = '(leave blank to keep existing)';
+
+                document.getElementById('modalTitle').textContent = 'Edit Proxy';
+                document.getElementById('proxyModal').classList.add('active');
+            } catch (error) {
+                showAlert('Error loading proxy: ' + error.message, 'error');
+            }
+        }
+
+        function closeModal() {
+            document.getElementById('proxyModal').classList.remove('active');
+            document.getElementById('apiKey').placeholder = 'Enter API key (encrypted in storage)';
+        }
+
+        async function submitForm(event) {
+            event.preventDefault();
+            const proxyId = document.getElementById('proxyId').value;
+            const isEdit = !!proxyId;
+
+            const formData = {
+                name: document.getElementById('name').value,
+                provider: document.getElementById('provider').value,
+                model: document.getElementById('model').value,
+                base_url: document.getElementById('baseUrl').value || null,
+                priority: parseInt(document.getElementById('priority').value),
+                description: document.getElementById('description').value || null,
+                enabled: document.getElementById('enabled').checked,
+            };
+
+            // Only include API key if provided
+            const apiKey = document.getElementById('apiKey').value;
+            if (apiKey) {
+                formData.api_key = apiKey;
+            }
+
+            try {
+                const url = isEdit ? `${API_BASE}/${proxyId}` : API_BASE;
+                const method = isEdit ? 'PUT' : 'POST';
+
+                const response = await fetch(url, {
+                    method,
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(formData),
+                });
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.detail || 'Failed to save proxy');
+                }
+
+                closeModal();
+                showAlert(`Proxy ${isEdit ? 'updated' : 'created'} successfully!`, 'success');
+                loadProxies();
+            } catch (error) {
+                showAlert('Error: ' + error.message, 'error');
+            }
+        }
+
+        async function toggleProxy(id, currentState) {
+            try {
+                const endpoint = currentState ? 'disable' : 'enable';
+                const response = await fetch(`${API_BASE}/${id}/${endpoint}`, {
+                    method: 'POST',
+                });
+
+                if (!response.ok) {
+                    throw new Error('Failed to toggle proxy');
+                }
+
+                showAlert(`Proxy ${currentState ? 'disabled' : 'enabled'} successfully!`, 'success');
+                loadProxies();
+            } catch (error) {
+                showAlert('Error: ' + error.message, 'error');
+            }
+        }
+
+        async function deleteProxy(id) {
+            if (!confirm('Are you sure you want to delete this proxy? This action cannot be undone.')) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE}/${id}`, {
+                    method: 'DELETE',
+                });
+
+                if (!response.ok) {
+                    throw new Error('Failed to delete proxy');
+                }
+
+                showAlert('Proxy deleted successfully!', 'success');
+                loadProxies();
+            } catch (error) {
+                showAlert('Error: ' + error.message, 'error');
+            }
+        }
+
+        function showAlert(message, type) {
+            const container = document.getElementById('alertContainer');
+            const alert = document.createElement('div');
+            alert.className = `alert alert-${type}`;
+            alert.textContent = message;
+            container.appendChild(alert);
+
+            setTimeout(() => {
+                alert.remove();
+            }, 5000);
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // Close modal when clicking outside
+        document.getElementById('proxyModal').addEventListener('click', function(e) {
+            if (e.target === this) {
+                closeModal();
+            }
+        });
+    </script>
+</body>
+</html>
